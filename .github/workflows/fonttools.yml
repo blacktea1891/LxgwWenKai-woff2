@@ -1,0 +1,31 @@
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install fonttools and brotli
+      run: |
+        python -m pip install --upgrade pip
+        pip install fonttools brotli
+
+    - name: Subset and Convert to WOFF2
+      run: |
+        cd fonts/ttf
+        for file in *.ttf; do
+          if [ -f "$file" ] && [ -s "$file" ]; then
+            echo "Subsetting and converting $file to WOFF2..."
+            # 使用 pyftsubset 保留常用字符并直接输出为 woff2 格式
+            # U+0000-00FF: 基础英文和半角符号
+            # U+2000-206F: 常用排版标点
+            # U+3000-303F: CJK 标点符号 (全角逗号句号等)
+            # U+4E00-9FA5: CJK 统一表意文字 (包含 20902 个最常用汉字，绝对够看任何小说)
+            # U+FF00-FFEF: 全角 ASCII 和半角标点
+            pyftsubset "$file" \
+              --unicodes="U+0000-00FF,U+2000-206F,U+3000-303F,U+4E00-9FA5,U+FF00-FFEF" \
+              --flavor=woff2 \
+              --output-file="../woff2/${file%.ttf}.woff2"
+            
+            echo "Successfully generated subset WOFF2 for $file"
+          fi
+        done
+        cd ../..
