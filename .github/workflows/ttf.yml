@@ -1,0 +1,91 @@
+name: Convert and Release LXGW WenKai Lite Subset TTF
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  subset-and-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    # 1. 只需要 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wget jq
+        python -m pip install --upgrade pip
+        pip install fonttools
+
+    - name: Create working directories
+      run: mkdir -p fonts/original_ttf fonts/subset_ttf
+
+    # 2. 动态获取最新版本号
+    - name: Get latest release version
+      id: get_version
+      run: |
+        API_URL="https://api.github.com/repos/lxgw/LxgwWenKai-Lite/releases/latest"
+        RELEASE_INFO=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" $API_URL)
+        VERSION=$(echo "$RELEASE_INFO" | jq -r .tag_name)
+        
+        if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+          echo "Error: Failed to fetch the latest version."
+          exit 1
+        fi
+        
+        echo "WENKAI_LITE_VERSION=$VERSION" >> $GITHUB_ENV
+        echo "Successfully fetched latest version: $VERSION"
+
+    # 3. 下载原始 TTF
+    - name: Download WenKai Lite TTF files
+      run: |
+        FONT_FILES=(
+          "LXGWWenKaiLite-Regular.ttf"
+          "LXGWWenKaiLite-Medium.ttf"
+        )
+        BASE_URL="https://github.com/lxgw/LxgwWenKai-Lite/releases/download/${{ env.WENKAI_LITE_VERSION }}"
+        
+        for FONT_FILE in "${FONT_FILES[@]}"; do
+          wget -q --show-progress -O "fonts/original_ttf/$FONT_FILE" "$BASE_URL/$FONT_FILE"
+        done
+
+    # 4. 仅进行子集化，保持 TTF 格式，并保留所有 Name ID 防止 MIME 误判
+    - name: Subset TTF directly
+      run: |
+        cd fonts/original_ttf
+        for file in *.ttf; do
+          if [ -f "$file" ] && [ -s "$file" ]; then
+            echo "Subsetting $file to < 5MB TTF..."
+            # --name-IDs='*' 极其关键：它保留了字体名称、版权等完整元数据，防止 Java 校验器报错
+            pyftsubset "$file" \
+              --unicodes="U+0000-00FF,U+2000-206F,U+3000-303F,U+4E00-9FA5,U+FF00-FFEF" \
+              --name-IDs='*' \
+              --output-file="../subset_ttf/$file"
+          fi
+        done
+        cd ../..
+
+    # 5. 发布最终瘦身版 TTF
+    - name: Create Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: subset-ttf-wenkai-lite-${{ env.WENKAI_LITE_VERSION }}
+        name: LXGW WenKai Lite Subset TTF (${{ env.WENKAI_LITE_VERSION }})
+        body: |
+          **专供版：纯 TTF 瘦身字体**
+          - **完美过检**：放弃容易导致 Java Tika 误判的 WOFF2 格式，采用最基础的 TTF 格式，且保留了完整的 Name Tables，确保 100% 通过 Grimmory 后端的 MIME 校验。
+          - **体积达标**：严格控制在 5MB 以下 (剔除生僻字及日文假名)。
+        artifacts: "fonts/subset_ttf/*.ttf"
+        token: ${{ secrets.GITHUB_TOKEN }}
+        draft: false
+        prerelease: false
