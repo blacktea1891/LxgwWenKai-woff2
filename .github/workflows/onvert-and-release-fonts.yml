@@ -3,6 +3,9 @@ name: Convert and Release LXGW WenKai Fonts to WOFF2
 on:
   # 手动触发
   workflow_dispatch:
+  
+permissions:
+  contents: write
 
 jobs:
   convert-and-release:
