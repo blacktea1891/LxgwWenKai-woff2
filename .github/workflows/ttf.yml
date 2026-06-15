@@ -1,4 +1,4 @@
-name: Convert and Release LXGW WenKai Lite Subset TTF
+name: Convert and Release LXGW WenKai Lite (Pure TTF)
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # 1. 只需要 Python 环境
+    # 1. 极简环境配置
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -59,32 +59,35 @@ jobs:
           wget -q --show-progress -O "fonts/original_ttf/$FONT_FILE" "$BASE_URL/$FONT_FILE"
         done
 
-    # 4. 仅进行子集化，保持 TTF 格式，并保留所有 Name ID 防止 MIME 误判
-    - name: Subset TTF directly
+    # 4. 核心魔法：生成纯血 TTF + 剥离微调指令（极限瘦身）
+    - name: Subset to Pure TTF
       run: |
         cd fonts/original_ttf
         for file in *.ttf; do
           if [ -f "$file" ] && [ -s "$file" ]; then
-            echo "Subsetting $file to < 5MB TTF..."
-            # --name-IDs='*' 极其关键：它保留了字体名称、版权等完整元数据，防止 Java 校验器报错
+            echo "Subsetting $file to < 5MB Pure TTF..."
+            
+            # --no-hinting: 核心大招！去除冗余的屏幕渲染微调指令，大幅降低 TTF 体积
+            # --name-IDs='*': 依然保留所有版权信息，满足 Java 校验
             pyftsubset "$file" \
               --unicodes="U+0000-00FF,U+2000-206F,U+3000-303F,U+4E00-9FA5,U+FF00-FFEF" \
               --name-IDs='*' \
+              --no-hinting \
               --output-file="../subset_ttf/$file"
           fi
         done
         cd ../..
 
-    # 5. 发布最终瘦身版 TTF
+    # 5. 发布最终版 TTF
     - name: Create Release
       uses: ncipollo/release-action@v1
       with:
-        tag: subset-ttf-wenkai-lite-${{ env.WENKAI_LITE_VERSION }}
-        name: LXGW WenKai Lite Subset TTF (${{ env.WENKAI_LITE_VERSION }})
+        tag: pure-ttf-wenkai-lite-${{ env.WENKAI_LITE_VERSION }}
+        name: LXGW WenKai Lite Pure TTF (${{ env.WENKAI_LITE_VERSION }})
         body: |
-          **专供版：纯 TTF 瘦身字体**
-          - **完美过检**：放弃容易导致 Java Tika 误判的 WOFF2 格式，采用最基础的 TTF 格式，且保留了完整的 Name Tables，确保 100% 通过 Grimmory 后端的 MIME 校验。
-          - **体积达标**：严格控制在 5MB 以下 (剔除生僻字及日文假名)。
+          **Grimmory 专供版：纯血 TTF 格式**
+          - **绝对过检**：放弃 WOFF2 格式，采用最基础的 `.ttf` 扩展名和底层结构，从根源上避开 Java 后端的 MIME 误判。
+          - **极限瘦身**：使用 `--no-hinting` 剥离了无用的屏幕微调指令，结合子集化，确保 TTF 单文件体积被死死压制在 5MB 以内。
         artifacts: "fonts/subset_ttf/*.ttf"
         token: ${{ secrets.GITHUB_TOKEN }}
         draft: false
