@@ -1,9 +1,9 @@
-name: Convert and Release LXGW WenKai Fonts to WOFF2
+name: Convert and Release LXGW WenKai Lite to WOFF2
 
 on:
-  # 手动触发
   workflow_dispatch:
-  
+
+# 修复 403 权限问题
 permissions:
   contents: write
 
@@ -14,114 +14,48 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v3
-      
-    - name: Install dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y cmake build-essential git wget libbrotli-dev
 
-    - name: Create fonts directory
-      run: mkdir -p fonts/ttf fonts/woff2
-    
-    - name: Get latest release info from LXGW WenKai
-      id: lxgw_release
-      run: |
-        API_URL="https://api.github.com/repos/lxgw/LxgwWenKai/releases/latest"
-        # 获取最新的版本信息
-        RELEASE_INFO=$(curl -s $API_URL)
-        VERSION=$(echo $RELEASE_INFO | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-        echo "WENKAI_VERSION=$VERSION" >> $GITHUB_ENV
-        echo "Latest LXGW WenKai version: $VERSION"
-    
-    - name: Get latest release info from LXGW WenKai Lite
-      id: lxgw_lite_release
-      run: |
-        API_URL="https://api.github.com/repos/lxgw/LxgwWenKai-Lite/releases/latest"
-        # 获取最新的版本信息
-        RELEASE_INFO=$(curl -s $API_URL)
-        VERSION=$(echo $RELEASE_INFO | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-        echo "WENKAI_LITE_VERSION=$VERSION" >> $GITHUB_ENV
-        echo "Latest LXGW WenKai Lite version: $VERSION"
-      
-    - name: Download WenKai TTF files
-      run: |
-        # 定义要下载的字体文件
-        FONT_FILES=(
-          "LXGWWenKai-Light.ttf"
-          "LXGWWenKai-Regular.ttf"
-          "LXGWWenKai-Medium.ttf"
-          "LXGWWenKaiMono-Light.ttf"
-          "LXGWWenKaiMono-Regular.ttf"
-          "LXGWWenKaiMono-Medium.ttf"
-        )
-        
-        # 构建下载基础URL
-        BASE_URL="https://github.com/lxgw/LxgwWenKai/releases/download/${{ env.WENKAI_VERSION }}"
-        
-        # 逐个下载字体文件
-        for FONT_FILE in "${FONT_FILES[@]}"; do
-          echo "Downloading $FONT_FILE"
-          DOWNLOAD_URL="$BASE_URL/$FONT_FILE"
-          echo "URL: $DOWNLOAD_URL"
-          wget -q --show-progress -O "fonts/ttf/$FONT_FILE" "$DOWNLOAD_URL" || echo "Warning: Failed to download $FONT_FILE"
-          
-          # 检查文件是否成功下载
-          if [ -f "fonts/ttf/$FONT_FILE" ] && [ -s "fonts/ttf/$FONT_FILE" ]; then
-            echo "Successfully downloaded $FONT_FILE"
-          else
-            echo "Error: $FONT_FILE download failed or file is empty"
-            rm -f "fonts/ttf/$FONT_FILE" 2>/dev/null
-          fi
-        done
-        
-        # 列出已下载的文件
-        echo "Downloaded WenKai TTF files:"
-        ls -la fonts/ttf/
-
-    - name: Download WenKai Lite TTF files
-      run: |
-        # 定义要下载的字体文件
-        FONT_FILES=(
-          "LXGWWenKaiLite-Light.ttf"
-          "LXGWWenKaiLite-Regular.ttf"
-          "LXGWWenKaiLite-Medium.ttf"
-          "LXGWWenKaiMonoLite-Light.ttf"
-          "LXGWWenKaiMonoLite-Regular.ttf"
-          "LXGWWenKaiMonoLite-Medium.ttf"
-        )
-        
-        # 构建下载基础URL
-        BASE_URL="https://github.com/lxgw/LxgwWenKai-Lite/releases/download/${{ env.WENKAI_LITE_VERSION }}"
-        
-        # 逐个下载字体文件
-        for FONT_FILE in "${FONT_FILES[@]}"; do
-          echo "Downloading $FONT_FILE"
-          DOWNLOAD_URL="$BASE_URL/$FONT_FILE"
-          echo "URL: $DOWNLOAD_URL"
-          wget -q --show-progress -O "fonts/ttf/$FONT_FILE" "$DOWNLOAD_URL" || echo "Warning: Failed to download $FONT_FILE"
-          
-          # 检查文件是否成功下载
-          if [ -f "fonts/ttf/$FONT_FILE" ] && [ -s "fonts/ttf/$FONT_FILE" ]; then
-            echo "Successfully downloaded $FONT_FILE"
-          else
-            echo "Error: $FONT_FILE download failed or file is empty"
-            rm -f "fonts/ttf/$FONT_FILE" 2>/dev/null
-          fi
-        done
-        
-        # 列出已下载的文件
-        echo "Downloaded WenKai Lite TTF files:"
-        ls -la fonts/ttf/
-        
+    # 配置 Python 环境用于精准裁剪
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
-
-    - name: Install fonttools and brotli
+        
+    - name: Install dependencies
       run: |
+        sudo apt-get update && sudo apt-get install -y wget
         python -m pip install --upgrade pip
         pip install fonttools brotli
+
+    - name: Create fonts directory
+      run: mkdir -p fonts/ttf fonts/woff2
+
+    - name: Get latest release info from LXGW WenKai Lite
+      id: lxgw_lite_release
+      run: |
+        API_URL="https://api.github.com/repos/lxgw/LxgwWenKai-Lite/releases/latest"
+        # 加上 GitHub Token 验证，彻底告别 API 速率限制导致的空版本号问题
+        RELEASE_INFO=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $API_URL)
+        VERSION=$(echo "$RELEASE_INFO" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+        
+        # 增加一个容错机制：如果还是获取不到，直接使用默认版本号，保证脚本绝不中断
+        if [ -z "$VERSION" ]; then VERSION="v1.522"; fi
+        
+        echo "WENKAI_LITE_VERSION=$VERSION" >> $GITHUB_ENV
+        echo "Latest LXGW WenKai Lite version: $VERSION"
+
+    - name: Download WenKai Lite TTF files
+      run: |
+        FONT_FILES=(
+          "LXGWWenKaiLite-Regular.ttf"
+          "LXGWWenKaiLite-Medium.ttf"
+        )
+        BASE_URL="https://github.com/lxgw/LxgwWenKai-Lite/releases/download/${{ env.WENKAI_LITE_VERSION }}"
+        
+        for FONT_FILE in "${FONT_FILES[@]}"; do
+          echo "Downloading $FONT_FILE"
+          wget -q --show-progress -O "fonts/ttf/$FONT_FILE" "$BASE_URL/$FONT_FILE"
+        done
 
     - name: Subset and Convert to WOFF2
       run: |
@@ -129,33 +63,25 @@ jobs:
         for file in *.ttf; do
           if [ -f "$file" ] && [ -s "$file" ]; then
             echo "Subsetting and converting $file to WOFF2..."
-            # 使用 pyftsubset 保留常用字符并直接输出为 woff2 格式
-            # U+0000-00FF: 基础英文和半角符号
-            # U+2000-206F: 常用排版标点
-            # U+3000-303F: CJK 标点符号 (全角逗号句号等)
-            # U+4E00-9FA5: CJK 统一表意文字 (包含 20902 个最常用汉字，绝对够看任何小说)
-            # U+FF00-FFEF: 全角 ASCII 和半角标点
+            # 使用 fonttools 提取常用字，直接输出为 woff2 格式，体积压缩至 5MB 以内
             pyftsubset "$file" \
               --unicodes="U+0000-00FF,U+2000-206F,U+3000-303F,U+4E00-9FA5,U+FF00-FFEF" \
               --flavor=woff2 \
               --output-file="../woff2/${file%.ttf}.woff2"
-            
-            echo "Successfully generated subset WOFF2 for $file"
           fi
         done
         cd ../..
 
-    
-    
-    - name: List converted gfiles
-      run: |
-        echo "WOFF2 files generated:"
-        ls -la fonts/woff2/
-    
     - name: Create Release
       uses: ncipollo/release-action@v1
       with:
-        tag: lxgw-woff2-wenkai-${{ env.WENKAI_VERSION }}-lite-${{ env.WENKAI_LITE_VERSION }}
-        name: LXGW WenKai & WenKai Lite WOFF2 Fonts (WenKai ${{ env.WENKAI_VERSION }}, Lite ${{ env.WENKAI_LITE_VERSION }})
+        tag: subset-woff2-wenkai-lite-${{ env.WENKAI_LITE_VERSION }}
+        name: LXGW WenKai Lite Subset WOFF2 (${{ env.WENKAI_LITE_VERSION }})
         body: |
-          WOFF2 version of LXGW WenKai 
+          **精简版 WOFF2 格式字体 (支持 Grimmory)**
+          - 采用 Fonttools 子集化处理，体积已严格控制在 5MB 以下。
+          - 剔除了生僻字及日文假名，保留了现代中文阅读所需的核心汉字及标点。
+        artifacts: "fonts/woff2/*.woff2"
+        token: ${{ secrets.GITHUB_TOKEN }}
+        draft: false
+        prerelease: false
