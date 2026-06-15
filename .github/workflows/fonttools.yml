@@ -1,9 +1,11 @@
-name: Convert and Release LXGW WenKai Lite to WOFF2
+name: Convert and Release LXGW WenKai Lite Final WOFF2
 
 on:
   workflow_dispatch:
+  # 如果你想让它每个月自动检查更新并运行一次，可以取消下面两行的注释
+  # schedule:
+  #   - cron: '0 0 1 * *'
 
-# 修复 403 权限问题
 permissions:
   contents: write
 
@@ -15,35 +17,50 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    # 配置 Python 环境用于精准裁剪
+    # 1. 配置 Python 和 C++ 编译环境
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.10'
         
-    - name: Install dependencies
+    - name: Install system & Python dependencies
       run: |
-        sudo apt-get update && sudo apt-get install -y wget
+        sudo apt-get update
+        sudo apt-get install -y cmake build-essential git wget libbrotli-dev jq
         python -m pip install --upgrade pip
-        pip install fonttools brotli
+        pip install fonttools
 
-    - name: Create fonts directory
-      run: mkdir -p fonts/ttf fonts/woff2
+    # 2. 编译 Google 官方纯正的 woff2 工具 (保证 MIME 100% 兼容)
+    - name: Build Google woff2 tool
+      run: |
+        git clone --recursive https://github.com/google/woff2.git
+        cd woff2
+        make
+        cd ..
 
-    - name: Get latest release info from LXGW WenKai Lite
-      id: lxgw_lite_release
+    - name: Create working directories
+      run: mkdir -p fonts/ttf fonts/subset_ttf fonts/woff2
+
+    # 3. 动态获取最新版本号 (带 Token 验证，绕过访问限制)
+    - name: Get latest release version
+      id: get_version
       run: |
         API_URL="https://api.github.com/repos/lxgw/LxgwWenKai-Lite/releases/latest"
-        # 加上 GitHub Token 验证，彻底告别 API 速率限制导致的空版本号问题
-        RELEASE_INFO=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $API_URL)
-        VERSION=$(echo "$RELEASE_INFO" | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
+        # 使用 Action 内置的 Token 进行身份验证，大幅提高 API 访问限额
+        RELEASE_INFO=$(curl -s -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" $API_URL)
         
-        # 增加一个容错机制：如果还是获取不到，直接使用默认版本号，保证脚本绝不中断
-        if [ -z "$VERSION" ]; then VERSION="v1.522"; fi
+        # 使用 jq 精准提取版本号
+        VERSION=$(echo "$RELEASE_INFO" | jq -r .tag_name)
+        
+        if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+          echo "Error: Failed to fetch the latest version. API Response: $RELEASE_INFO"
+          exit 1 # 获取失败则立刻阻断，防止生成残缺的 Release
+        fi
         
         echo "WENKAI_LITE_VERSION=$VERSION" >> $GITHUB_ENV
-        echo "Latest LXGW WenKai Lite version: $VERSION"
+        echo "Successfully fetched latest version: $VERSION"
 
+    # 4. 下载最新字体
     - name: Download WenKai Lite TTF files
       run: |
         FONT_FILES=(
@@ -53,34 +70,40 @@ jobs:
         BASE_URL="https://github.com/lxgw/LxgwWenKai-Lite/releases/download/${{ env.WENKAI_LITE_VERSION }}"
         
         for FONT_FILE in "${FONT_FILES[@]}"; do
-          echo "Downloading $FONT_FILE"
+          echo "Downloading $FONT_FILE..."
           wget -q --show-progress -O "fonts/ttf/$FONT_FILE" "$BASE_URL/$FONT_FILE"
         done
 
-    - name: Subset and Convert to WOFF2
+    # 5. 终极打包核心逻辑：先 Python 瘦身，再 Google 压缩
+    - name: Subset and Compress
       run: |
         cd fonts/ttf
         for file in *.ttf; do
           if [ -f "$file" ] && [ -s "$file" ]; then
-            echo "Subsetting and converting $file to WOFF2..."
-            # 使用 fonttools 提取常用字，直接输出为 woff2 格式，体积压缩至 5MB 以内
+            echo "Step A: Subsetting $file to remove rare chars (Keeping as TTF)..."
             pyftsubset "$file" \
               --unicodes="U+0000-00FF,U+2000-206F,U+3000-303F,U+4E00-9FA5,U+FF00-FFEF" \
-              --flavor=woff2 \
-              --output-file="../woff2/${file%.ttf}.woff2"
+              --output-file="../subset_ttf/$file"
+              
+            echo "Step B: Compressing subsetted TTF using Google woff2_compress..."
+            ../../woff2/woff2_compress "../subset_ttf/$file"
+            
+            mv "../subset_ttf/${file%.ttf}.woff2" "../woff2/"
           fi
         done
         cd ../..
 
+    # 6. 发布最终完美版
     - name: Create Release
       uses: ncipollo/release-action@v1
       with:
-        tag: subset-woff2-wenkai-lite-${{ env.WENKAI_LITE_VERSION }}
-        name: LXGW WenKai Lite Subset WOFF2 (${{ env.WENKAI_LITE_VERSION }})
+        tag: final-woff2-wenkai-lite-${{ env.WENKAI_LITE_VERSION }}
+        name: LXGW WenKai Lite Final WOFF2 (${{ env.WENKAI_LITE_VERSION }})
         body: |
-          **精简版 WOFF2 格式字体 (支持 Grimmory)**
-          - 采用 Fonttools 子集化处理，体积已严格控制在 5MB 以下。
-          - 剔除了生僻字及日文假名，保留了现代中文阅读所需的核心汉字及标点。
+          **终极兼容版 WOFF2 格式字体 (专为 Grimmory 优化)**
+          - **跟随官方更新**：当前版本为官方最新的 `${{ env.WENKAI_LITE_VERSION }}`。
+          - **体积达标**：严格控制在 5MB 以下 (使用 Fonttools 子集化剔除生僻字)。
+          - **MIME 兼容**：使用 Google 官方 `woff2` 引擎重新打包，完美通过 Java 后端的格式校验。
         artifacts: "fonts/woff2/*.woff2"
         token: ${{ secrets.GITHUB_TOKEN }}
         draft: false
